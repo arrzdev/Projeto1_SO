@@ -62,7 +62,14 @@ static bool valid_pathname(char const *name) {
  * Returns the inumber of the file, -1 if unsuccessful.
  */
 static int tfs_lookup(char const *name, inode_t const *root_inode) {
-    // TODO: assert that root_inode is the root directory
+    inode_t *root = inode_get(ROOT_DIR_INUM);
+
+    ALWAYS_ASSERT(root != NULL, "tfs_open: root dir inode must exist");
+
+    if (root != root_inode) {
+        return -1;
+    }
+
     if (!valid_pathname(name)) {
         return -1;
     }
@@ -90,6 +97,22 @@ int tfs_open(char const *name, tfs_file_mode_t mode) {
         inode_t *inode = inode_get(inum);
         ALWAYS_ASSERT(inode != NULL,
                       "tfs_open: directory files must have an inode");
+
+        // handle recursion of symbolic links
+        if (inode->i_node_type == T_LINK) {
+            // read symlink file content
+            int file = add_to_open_file_table(inum, 0);
+
+            // copy file data to buffer
+            char buffer[1024];
+            tfs_read(file, buffer, 1024);
+
+            // close and remove from open file table the symlink file
+            remove_from_open_file_table(file);
+
+            if (valid_pathname(buffer))
+                return tfs_open(buffer, mode);
+        }
 
         // Truncate (if requested)
         if (mode & TFS_O_TRUNC) {
@@ -123,8 +146,6 @@ int tfs_open(char const *name, tfs_file_mode_t mode) {
         return -1;
     }
 
-    // Finally, add entry to the open file table and return the corresponding
-    // handle
     return add_to_open_file_table(inum, offset);
 
     // Note: for simplification, if file was created with TFS_O_CREAT and there
@@ -133,21 +154,67 @@ int tfs_open(char const *name, tfs_file_mode_t mode) {
 }
 
 int tfs_sym_link(char const *target, char const *link_name) {
-    (void)target;
-    (void)link_name;
-    // ^ this is a trick to keep the compiler from complaining about unused
-    // variables. TODO: remove
+    if (!valid_pathname(link_name))
+        return -1;
 
-    PANIC("TODO: tfs_sym_link");
+    inode_t *rootNode = inode_get(ROOT_DIR_INUM);
+
+    // check if the file exists
+    int inumber = tfs_lookup(target, rootNode);
+    if (inumber == -1) // if the file doesnt exist
+        return -1;
+
+    // create soft link inode
+    int soft_link_inumber = inode_create(T_LINK);
+    if (soft_link_inumber == -1)
+        return -1;
+
+    // add dir entry
+    if (add_dir_entry(rootNode, link_name + 1, soft_link_inumber) == -1) {
+        inode_delete(soft_link_inumber);
+        return -1;
+    }
+
+    inode_t *soft_link_inode = inode_get(soft_link_inumber);
+    if (soft_link_inode == NULL)
+        return -1;
+
+    // open the file of tfs and write the path of the target
+    int soft_link_file = tfs_open(link_name, TFS_O_APPEND);
+
+    if (tfs_write(soft_link_file, target,
+                  (strlen(target) + 1) * sizeof(char)) == -1)
+        return -1;
+
+    // close file
+    tfs_close(soft_link_file);
+
+    soft_link_inode->i_size = strlen(target) + 1;
+    return 0;
 }
 
 int tfs_link(char const *target, char const *link_name) {
-    (void)target;
-    (void)link_name;
-    // ^ this is a trick to keep the compiler from complaining about unused
-    // variables. TODO: remove
+    if (!valid_pathname(link_name))
+        return -1;
 
-    PANIC("TODO: tfs_link");
+    inode_t *rootNode = inode_get(ROOT_DIR_INUM);
+
+    // check if the file exists
+    int inumber = tfs_lookup(target, rootNode);
+    if (inumber == -1) // if the file doesnt exist
+        return -1;
+
+    // check if it is soft_link
+    inode_t *inodeToLink = inode_get(inumber);
+    if (inodeToLink->i_node_type == T_LINK)
+        return -1;
+
+    // add hardlink and handle error
+    if (add_dir_entry(rootNode, link_name + 1, inumber) == -1)
+        return -1;
+
+    inodeToLink->hard_links++;
+    return 0;
 }
 
 int tfs_close(int fhandle) {
@@ -194,7 +261,8 @@ ssize_t tfs_write(int fhandle, void const *buffer, size_t to_write) {
         // Perform the actual write
         memcpy(block + file->of_offset, buffer, to_write);
 
-        // The offset associated with the file handle is incremented accordingly
+        // The offset associated with the file handle is incremented
+        // accordingly
         file->of_offset += to_write;
         if (file->of_offset > inode->i_size) {
             inode->i_size = file->of_offset;
@@ -226,7 +294,8 @@ ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
 
         // Perform the actual read
         memcpy(buffer, block + file->of_offset, to_read);
-        // The offset associated with the file handle is incremented accordingly
+        // The offset associated with the file handle is incremented
+        // accordingly
         file->of_offset += to_read;
     }
 
@@ -234,18 +303,78 @@ ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
 }
 
 int tfs_unlink(char const *target) {
-    (void)target;
-    // ^ this is a trick to keep the compiler from complaining about unused
-    // variables. TODO: remove
+    inode_t *rootNode = inode_get(ROOT_DIR_INUM);
 
-    PANIC("TODO: tfs_unlink");
+    int inumber = tfs_lookup(target, rootNode);
+    if (inumber == -1) {
+        printf("Hello");
+        return -1;
+    }
+
+    inode_t *node = inode_get(inumber);
+
+    // Soft-link
+    if (node->i_node_type == T_LINK) {
+        inode_delete(inumber);
+    } else {
+        // Hard-link
+        node->hard_links--;
+        if (node->hard_links == 0) {
+            inode_delete(inumber);
+        }
+    }
+
+    if (clear_dir_entry(rootNode, target + 1) == -1)
+        return -1;
+
+    return 0;
 }
 
 int tfs_copy_from_external_fs(char const *source_path, char const *dest_path) {
-    (void)source_path;
-    (void)dest_path;
-    // ^ this is a trick to keep the compiler from complaining about unused
-    // variables. TODO: remove
+    if (!valid_pathname(dest_path))
+        return -1;
 
-    PANIC("TODO: tfs_copy_from_external_fs");
+    /*
+    // verify test if new file have less data than the already existent file
+    // check if fileExist
+    int fileIndex = tfs_lookup(dest_path, inode_get(ROOT_DIR_INUM));
+    int fileIndex =
+      tfs_open(dest_path, fileExist != -1 ? TFS_O_TRUNC : TFS_O_CREAT);
+    */
+
+    int fileIndex = tfs_open(dest_path, TFS_O_CREAT | TFS_O_TRUNC);
+    // Open the file for reading
+    FILE *fp = fopen(source_path, "r");
+    if (!fp) {
+        return -1;
+    }
+
+    // additional logic to check if fopen reads all the bytes of the file
+    fseek(fp, 0, SEEK_END); // moves file pointer to the end of file
+    size_t fileSize = (size_t)ftell(fp); // returns current byte
+    rewind(fp); // moves file pointer to the beginning of file
+
+    // Allocate a buffer to hold the file contents
+    char *buffer = (char *)malloc(sizeof(char) * fileSize);
+    if (!buffer) {
+        // Error allocating memory
+        return -1;
+    }
+
+    // Read the file contents into the buffer
+    size_t bytesRead = fread(buffer, 1, fileSize, fp);
+    if (bytesRead < fileSize) {
+        // Error reading the file
+        return -1;
+    }
+
+    // close file
+    fclose(fp);
+
+    // Do something with the buffer...
+    tfs_write(fileIndex, buffer, fileSize);
+
+    // Free the buffer and close the file
+    free(buffer);
+    return 0;
 }

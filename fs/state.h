@@ -17,7 +17,8 @@ typedef struct {
     int d_inumber;
 } dir_entry_t;
 
-typedef enum { T_FILE, T_DIRECTORY } inode_type;
+// added extra type to handle soft links
+typedef enum { T_FILE, T_DIRECTORY, T_LINK } inode_type;
 
 /**
  * Inode
@@ -27,8 +28,7 @@ typedef struct {
 
     size_t i_size;
     int i_data_block;
-
-    // in a more complete FS, more fields could exist here
+    int hard_links;
 } inode_t;
 
 typedef enum { FREE = 0, TAKEN = 1 } allocation_state_t;

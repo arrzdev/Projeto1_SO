@@ -94,6 +94,8 @@ $(TARGET_EXECS): fs/operations.o fs/state.o
 
 # $$f is "$f" escaped under the make program.
 
+#how can I modify this to echo number of passed tests and number of failed tests?
+
 test: $(TARGET_EXECS)
 	retcode=0; \
 	for f in $^; do \
