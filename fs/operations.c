@@ -12,14 +12,18 @@
 static pthread_mutex_t *mutex_global;
 static pthread_rwlock_t *inode_locks;
 
+static tfs_params PARAMS;
 tfs_params tfs_default_params() {
     tfs_params params = {
         .max_inode_count = 64,
         .max_block_count = 1024,
-        .max_open_files_count =
-            16, // TODO: Check if any sanitazion is needed on this
+        .max_open_files_count =16, 
         .block_size = 1024,
     };
+
+    // define PARAMS as global
+    PARAMS = params;
+    
     return params;
 }
 
@@ -49,13 +53,13 @@ int tfs_init(tfs_params const *params_ptr) {
     }
 
     inode_locks =
-        (pthread_rwlock_t *)malloc(sizeof(pthread_rwlock_t) * INODE_TABLE_SIZE);
+        (pthread_rwlock_t *)malloc(sizeof(pthread_rwlock_t) * PARAMS.max_inode_count);
 
     if (inode_locks == NULL)
         return -1;
 
     // initialize inode locks
-    for (int i = 0; i < INODE_TABLE_SIZE; i++) {
+    for (int i = 0; i < PARAMS.max_inode_count; i++) {
         if (pthread_rwlock_init(&inode_locks[i], NULL) != 0) {
             return -1;
         }
@@ -76,7 +80,7 @@ int tfs_destroy() {
     free(mutex_global);
 
     // destroy inode locks
-    for (int i = 0; i < INODE_TABLE_SIZE; i++) {
+    for (int i = 0; i < PARAMS.max_inode_count; i++) {
         if (pthread_rwlock_destroy(&inode_locks[i]) != 0) {
             return -1;
         }
@@ -148,8 +152,8 @@ int tfs_open(char const *name, tfs_file_mode_t mode) {
 
             pthread_rwlock_wrlock(&inode_locks[inum]);
             // copy file data to buffer
-            char buffer[BLOCK_SIZE];
-            tfs_read(file, buffer, BLOCK_SIZE);
+            char buffer[PARAMS.block_size];
+            tfs_read(file, buffer, PARAMS.block_size);
             pthread_rwlock_unlock(&inode_locks[inum]);
 
             // close and remove from open file table the symlink file
@@ -415,7 +419,7 @@ int tfs_copy_from_external_fs(char const *source_path, char const *dest_path) {
     rewind(fp); // moves file pointer to the beginning of file
 
     // Allocate a buffer to hold the file contents
-    char buffer[BLOCK_SIZE];
+    char buffer[PARAMS.block_size];
 
     // Read the file contents into the buffer
     size_t bytes_read = fread(buffer, 1, file_size, fp);

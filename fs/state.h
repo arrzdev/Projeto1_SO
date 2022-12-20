@@ -9,13 +9,6 @@
 #include <stdlib.h>
 #include <sys/types.h>
 
-tfs_params fs_params;
-#define INODE_TABLE_SIZE (fs_params.max_inode_count)
-#define DATA_BLOCKS (fs_params.max_block_count)
-#define MAX_OPEN_FILES (fs_params.max_open_files_count)
-#define BLOCK_SIZE (fs_params.block_size)
-#define MAX_DIR_ENTRIES (BLOCK_SIZE / sizeof(dir_entry_t))
-
 /**
  * Directory entry
  */
