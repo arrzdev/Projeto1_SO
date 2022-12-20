@@ -12,7 +12,8 @@ tfs_params tfs_default_params() {
     tfs_params params = {
         .max_inode_count = 64,
         .max_block_count = 1024,
-        .max_open_files_count = 16,
+        .max_open_files_count =
+            16, // TODO: Check if any sanitazion is needed on this
         .block_size = 1024,
     };
     return params;
@@ -104,8 +105,8 @@ int tfs_open(char const *name, tfs_file_mode_t mode) {
             int file = add_to_open_file_table(inum, 0);
 
             // copy file data to buffer
-            char buffer[1024];
-            tfs_read(file, buffer, 1024);
+            char buffer[BLOCK_SIZE];
+            tfs_read(file, buffer, BLOCK_SIZE);
 
             // close and remove from open file table the symlink file
             remove_from_open_file_table(file);
@@ -335,14 +336,14 @@ int tfs_copy_from_external_fs(char const *source_path, char const *dest_path) {
         return -1;
 
     /*
-    // verify test if new file have less data than the already existent file
+    // TODO: verify test if new file have less data than the already existent
+    file
     // check if fileExist
     int fileIndex = tfs_lookup(dest_path, inode_get(ROOT_DIR_INUM));
     int fileIndex =
       tfs_open(dest_path, fileExist != -1 ? TFS_O_TRUNC : TFS_O_CREAT);
     */
 
-    int fileIndex = tfs_open(dest_path, TFS_O_CREAT | TFS_O_TRUNC);
     // Open the file for reading
     FILE *fp = fopen(source_path, "r");
     if (!fp) {
@@ -355,26 +356,23 @@ int tfs_copy_from_external_fs(char const *source_path, char const *dest_path) {
     rewind(fp); // moves file pointer to the beginning of file
 
     // Allocate a buffer to hold the file contents
-    char *buffer = (char *)malloc(sizeof(char) * fileSize);
-    if (!buffer) {
-        // Error allocating memory
-        return -1;
-    }
+    char buffer[BLOCK_SIZE];
 
     // Read the file contents into the buffer
     size_t bytesRead = fread(buffer, 1, fileSize, fp);
+    // close file
+    fclose(fp);
+
     if (bytesRead < fileSize) {
         // Error reading the file
         return -1;
     }
 
-    // close file
-    fclose(fp);
-
     // Do something with the buffer...
+    int fileIndex = tfs_open(dest_path, TFS_O_CREAT | TFS_O_TRUNC);
     tfs_write(fileIndex, buffer, fileSize);
+    tfs_close(fileIndex);
 
     // Free the buffer and close the file
-    free(buffer);
     return 0;
 }

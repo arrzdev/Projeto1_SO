@@ -12,7 +12,6 @@
  * (in reality, it should be maintained in secondary memory;
  * for simplicity, this project maintains it in primary memory).
  */
-static tfs_params fs_params;
 
 // Inode table
 static inode_t *inode_table;
@@ -27,13 +26,6 @@ static allocation_state_t *free_blocks;
  */
 static open_file_entry_t *open_file_table;
 static allocation_state_t *free_open_file_entries;
-
-// Convenience macros
-#define INODE_TABLE_SIZE (fs_params.max_inode_count)
-#define DATA_BLOCKS (fs_params.max_block_count)
-#define MAX_OPEN_FILES (fs_params.max_open_files_count)
-#define BLOCK_SIZE (fs_params.block_size)
-#define MAX_DIR_ENTRIES (BLOCK_SIZE / sizeof(dir_entry_t))
 
 static inline bool valid_inumber(int inumber) {
     return inumber >= 0 && inumber < INODE_TABLE_SIZE;
