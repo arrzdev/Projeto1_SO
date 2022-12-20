@@ -6,7 +6,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <pthread.h>
+
 #include "betterassert.h"
+
+static pthread_mutex_t global_mutex = PTHREAD_MUTEX_INITIALIZER;
+// static pthread_mutex_t *mutex_table;
 
 tfs_params tfs_default_params() {
     tfs_params params = {
@@ -27,23 +32,30 @@ int tfs_init(tfs_params const *params_ptr) {
         params = tfs_default_params();
     }
 
+    pthread_mutex_lock(&global_mutex);
     if (state_init(params) != 0) {
+        pthread_mutex_unlock(&global_mutex);
         return -1;
     }
 
     // create root inode
     int root = inode_create(T_DIRECTORY);
     if (root != ROOT_DIR_INUM) {
+        pthread_mutex_unlock(&global_mutex);
         return -1;
     }
 
+    pthread_mutex_unlock(&global_mutex);
     return 0;
 }
 
 int tfs_destroy() {
+    pthread_mutex_lock(&global_mutex);
     if (state_destroy() != 0) {
+        pthread_mutex_unlock(&global_mutex);
         return -1;
     }
+    pthread_mutex_unlock(&global_mutex);
     return 0;
 }
 
@@ -78,7 +90,10 @@ static int tfs_lookup(char const *name, inode_t const *root_inode) {
     // skip the initial '/' character
     name++;
 
-    return find_in_dir(root_inode, name);
+    pthread_mutex_lock(&global_mutex);
+    int return_value = find_in_dir(root_inode, name);
+    pthread_mutex_unlock(&global_mutex);
+    return return_value;
 }
 
 int tfs_open(char const *name, tfs_file_mode_t mode) {
@@ -352,26 +367,26 @@ int tfs_copy_from_external_fs(char const *source_path, char const *dest_path) {
 
     // additional logic to check if fopen reads all the bytes of the file
     fseek(fp, 0, SEEK_END); // moves file pointer to the end of file
-    size_t fileSize = (size_t)ftell(fp); // returns current byte
+    size_t file_size = (size_t)ftell(fp); // returns current byte
     rewind(fp); // moves file pointer to the beginning of file
 
     // Allocate a buffer to hold the file contents
     char buffer[BLOCK_SIZE];
 
     // Read the file contents into the buffer
-    size_t bytesRead = fread(buffer, 1, fileSize, fp);
+    size_t bytes_read = fread(buffer, 1, file_size, fp);
     // close file
     fclose(fp);
 
-    if (bytesRead < fileSize) {
+    if (bytes_read < file_size) {
         // Error reading the file
         return -1;
     }
 
     // Do something with the buffer...
-    int fileIndex = tfs_open(dest_path, TFS_O_CREAT | TFS_O_TRUNC);
-    tfs_write(fileIndex, buffer, fileSize);
-    tfs_close(fileIndex);
+    int file_index = tfs_open(dest_path, TFS_O_CREAT | TFS_O_TRUNC);
+    tfs_write(file_index, buffer, file_size);
+    tfs_close(file_index);
 
     // Free the buffer and close the file
     return 0;
